@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String         @id @default(cuid())
+  login        String         @unique
+  passwordHash String
+  role         String         @default("user") // admin | user
+  blocked      Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  shipments    Shipment[]
+  logs         ActivityLog[]
+  transfers    StockTransfer[]
+
+  @@index([login])
+}
+
+model Warehouse {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  createdAt     DateTime       @default(now())
+  shipments     Shipment[]
+  transfersFrom StockTransfer[] @relation("TransferFrom")
+  transfersTo   StockTransfer[] @relation("TransferTo")
+}
+
+model Shipment {
+  id                String        @id @default(cuid())
+  title             String
+  supplier          String        @default("Китай")
+  note              String        @default("")
+  status            String        @default("draft") // draft | uploaded
+  packingFileName   String?
+  packingFilePath   String?
+  packingUploadedAt DateTime?
+  warehouseId       String?
+  warehouse         Warehouse?    @relation(fields: [warehouseId], references: [id])
+  createdById       String
+  createdBy         User          @relation(fields: [createdById], references: [id])
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  items             PackingItem[]
+  logs              ActivityLog[]
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([warehouseId])
+}
+
+model Settings {
+  id               Int       @id @default(1)
+  productsFileUrl  String    @default("")
+  lastProductsSync DateTime?
+  productsCount    Int       @default(0)
+  updatedAt        DateTime  @updatedAt
+}
+
+model CatalogProduct {
+  id         String           @id @default(cuid())
+  code       String           @unique
+  article    String           @default("")
+  name       String
+  searchText String           @default("")
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  mappings   ProductMapping[]
+  items      PackingItem[]
+
+  @@index([searchText])
+  @@index([name])
+}
+
+model ProductMapping {
+  id           String         @id @default(cuid())
+  supplierKey  String         @unique
+  supplierName String
+  productId    String
+  product      CatalogProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([productId])
+}
+
+model PackingItem {
+  id                   String   @id @default(cuid())
+  shipmentId           String
+  shipment             Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  lineNo               Int
+  cartonLabel          String   @default("")
+  cartonFrom           Int?
+  cartonTo             Int?
+  mark                 String   @default("")
+  supplierName         String
+  supplierKey          String   @default("")
+  nameLocked           Boolean  @default(false)
+  mappedName           String   @default("")
+  mappedCode           String   @default("")
+  mappedArticle        String   @default("")
+  productId            String?
+  product              CatalogProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  pcsPerCarton         Float?
+  totalPcs             Float?
+  totalCartons         Float?
+  grossWeightPerCarton Float?
+  totalGrossWeight     Float?
+  lengthCm             Float?
+  widthCm              Float?
+  heightCm             Float?
+  volumeCbm            Float?
+  totalCbm             Float?
+  createdAt            DateTime @default(now())
+
+  @@index([shipmentId])
+  @@index([supplierKey])
+}
+
+model StockTransfer {
+  id              String              @id @default(cuid())
+  fromWarehouseId String
+  fromWarehouse   Warehouse           @relation("TransferFrom", fields: [fromWarehouseId], references: [id])
+  toWarehouseId   String
+  toWarehouse     Warehouse           @relation("TransferTo", fields: [toWarehouseId], references: [id])
+  note            String              @default("")
+  createdById     String
+  createdBy       User                @relation(fields: [createdById], references: [id])
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  lines           StockTransferLine[]
+
+  @@index([createdAt])
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+}
+
+model StockTransferLine {
+  id             String                    @id @default(cuid())
+  transferId     String
+  transfer       StockTransfer             @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId      String?
+  productName    String
+  productCode    String                    @default("")
+  productArticle String                    @default("")
+  qty            Float
+  sortOrder      Int                       @default(0)
+  allocations    StockTransferAllocation[]
+
+  @@index([transferId])
+}
+
+model StockTransferAllocation {
+  id            String            @id @default(cuid())
+  lineId        String
+  line          StockTransferLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  packingItemId String
+  shipmentId    String
+  cartonNo      Int
+  qty           Float
+
+  @@index([lineId])
+  @@index([packingItemId, cartonNo])
+  @@index([shipmentId])
+}
+
+model ActivityLog {
+  id         String    @id @default(cuid())
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id])
+  shipmentId String?
+  shipment   Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  action     String
+  message    String
+  createdAt  DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([shipmentId])
+}

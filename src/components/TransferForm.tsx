@@ -1,0 +1,592 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { WarehouseSelect } from "@/components/WarehouseSelect";
+import { ProductPhotoPreview } from "@/components/ProductPhotoPreview";
+import { formatNumber } from "@/lib/format";
+
+type CartonOption = {
+  packingItemId: string;
+  shipmentId: string;
+  shipmentTitle: string;
+  cartonNo: number;
+  available: number;
+};
+
+type StockProduct = {
+  key: string;
+  productId: string | null;
+  productName: string;
+  productCode: string;
+  productArticle: string;
+  supplierName: string;
+  availableTotal: number;
+  photoUrl: string | null;
+  cartons: CartonOption[];
+};
+
+type LineDraft = {
+  localId: string;
+  key: string;
+  productId: string | null;
+  productName: string;
+  productCode: string;
+  productArticle: string;
+  photoUrl: string | null;
+  qty: number;
+  cartons: CartonOption[];
+  selectedKeys: string[];
+};
+
+type InitialTransfer = {
+  id: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  note: string;
+  lines: {
+    productId: string | null;
+    productName: string;
+    productCode: string;
+    productArticle: string;
+    qty: number;
+    allocations: {
+      packingItemId: string;
+      shipmentId: string;
+      cartonNo: number;
+      qty: number;
+    }[];
+  }[];
+};
+
+function cartonOptionKey(c: Pick<CartonOption, "packingItemId" | "cartonNo">) {
+  return `${c.packingItemId}:${c.cartonNo}`;
+}
+
+function selectedCapacity(line: LineDraft) {
+  return line.cartons
+    .filter((c) => line.selectedKeys.includes(cartonOptionKey(c)))
+    .reduce((sum, c) => sum + c.available, 0);
+}
+
+function needsShipmentLabel(cartons: CartonOption[]) {
+  const byNo = new Map<number, Set<string>>();
+  for (const c of cartons) {
+    const set = byNo.get(c.cartonNo) ?? new Set();
+    set.add(c.shipmentId);
+    byNo.set(c.cartonNo, set);
+  }
+  return [...byNo.values()].some((set) => set.size > 1);
+}
+
+export function TransferForm({
+  mode,
+  transferId,
+  initial,
+}: {
+  mode: "create" | "edit";
+  transferId?: string;
+  initial?: InitialTransfer;
+}) {
+  const router = useRouter();
+  const [fromWarehouseId, setFromWarehouseId] = useState<string | null>(
+    initial?.fromWarehouseId ?? null,
+  );
+  const [toWarehouseId, setToWarehouseId] = useState<string | null>(
+    initial?.toWarehouseId ?? null,
+  );
+  const [note, setNote] = useState(initial?.note ?? "");
+  const [lines, setLines] = useState<LineDraft[]>([]);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<StockProduct[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [bootstrapping, setBootstrapping] = useState(mode === "edit");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchBoxRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (mode !== "edit" || !initial || !fromWarehouseId) {
+      setBootstrapping(false);
+      return;
+    }
+
+    let cancelled = false;
+    async function hydrate() {
+      setBootstrapping(true);
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/transfers/stock?warehouseId=${encodeURIComponent(fromWarehouseId!)}&q=&limit=80&excludeTransferId=${encodeURIComponent(initial!.id)}`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Не удалось загрузить остатки");
+        const products = (data.products || []) as StockProduct[];
+
+        const nextLines: LineDraft[] = initial!.lines.map((line, index) => {
+          const match =
+            products.find(
+              (p) =>
+                (line.productId && p.productId === line.productId) ||
+                (p.productName === line.productName &&
+                  p.productCode === line.productCode &&
+                  p.productArticle === line.productArticle),
+            ) || null;
+
+          const cartons = match?.cartons ?? [];
+          const selectedKeys = line.allocations.map((a) =>
+            cartonOptionKey({ packingItemId: a.packingItemId, cartonNo: a.cartonNo }),
+          );
+
+          // Ensure selected cartons exist even if match incomplete
+          const cartonMap = new Map(cartons.map((c) => [cartonOptionKey(c), c]));
+          for (const a of line.allocations) {
+            const key = cartonOptionKey(a);
+            if (!cartonMap.has(key)) {
+              cartonMap.set(key, {
+                packingItemId: a.packingItemId,
+                shipmentId: a.shipmentId,
+                shipmentTitle: "Поставка",
+                cartonNo: a.cartonNo,
+                available: a.qty,
+              });
+            }
+          }
+
+          return {
+            localId: `init-${index}`,
+            key: match?.key || `line-${index}`,
+            productId: line.productId,
+            productName: line.productName,
+            productCode: line.productCode,
+            productArticle: line.productArticle,
+            photoUrl: match?.photoUrl ?? null,
+            qty: line.qty,
+            cartons: [...cartonMap.values()],
+            selectedKeys,
+          };
+        });
+
+        if (!cancelled) setLines(nextLines);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) setBootstrapping(false);
+      }
+    }
+
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, transferId]);
+
+  async function search(value: string, warehouseId: string) {
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const params = new URLSearchParams({
+        warehouseId,
+        q: value,
+        limit: "40",
+      });
+      if (transferId) params.set("excludeTransferId", transferId);
+      const res = await fetch(`/api/transfers/stock?${params}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Ошибка поиска");
+      setHits(data.products || []);
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : String(err));
+      setHits([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function onQuery(value: string) {
+    setQuery(value);
+    if (!fromWarehouseId) {
+      setHits([]);
+      return;
+    }
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => void search(value, fromWarehouseId), 220);
+  }
+
+  function onSearchFocus() {
+    if (blurTimer.current) clearTimeout(blurTimer.current);
+    setSearchOpen(true);
+    if (fromWarehouseId) void search(query, fromWarehouseId);
+  }
+
+  function onSearchBlur() {
+    blurTimer.current = setTimeout(() => setSearchOpen(false), 150);
+  }
+
+  useEffect(() => {
+    if (!fromWarehouseId) {
+      setHits([]);
+      setSearchOpen(false);
+      return;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromWarehouseId]);
+
+  function addProduct(product: StockProduct) {
+    const existing = lines.find((l) => l.key === product.key);
+    setQuery("");
+    setHits([]);
+    setSearchOpen(false);
+
+    if (existing) {
+      const row = document.getElementById(`transfer-line-${existing.localId}`);
+      if (row) {
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+        row.classList.remove("row-attention");
+        void row.offsetWidth;
+        row.classList.add("row-attention");
+        window.setTimeout(() => row.classList.remove("row-attention"), 2100);
+      }
+      return;
+    }
+
+    setLines((prev) => [
+      {
+        localId: `${product.key}-${Date.now()}`,
+        key: product.key,
+        productId: product.productId,
+        productName: product.productName,
+        productCode: product.productCode,
+        productArticle: product.productArticle,
+        photoUrl: product.photoUrl,
+        qty: 1,
+        cartons: product.cartons,
+        selectedKeys: [],
+      },
+      ...prev,
+    ]);
+  }
+
+  function updateLine(localId: string, patch: Partial<LineDraft>) {
+    setLines((prev) =>
+      prev.map((line) => (line.localId === localId ? { ...line, ...patch } : line)),
+    );
+  }
+
+  function toggleCarton(localId: string, carton: CartonOption) {
+    const key = cartonOptionKey(carton);
+    setLines((prev) =>
+      prev.map((line) => {
+        if (line.localId !== localId) return line;
+        const selected = line.selectedKeys.includes(key)
+          ? line.selectedKeys.filter((k) => k !== key)
+          : [...line.selectedKeys, key];
+        return { ...line, selectedKeys: selected };
+      }),
+    );
+  }
+
+  function removeLine(localId: string) {
+    setLines((prev) => prev.filter((l) => l.localId !== localId));
+  }
+
+  const lineErrors = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const line of lines) {
+      const cap = selectedCapacity(line);
+      if (line.selectedKeys.length === 0) {
+        map[line.localId] = "Выберите коробки";
+      } else if (cap + 1e-9 < line.qty) {
+        map[line.localId] = `Недостаточно в выбранных коробках (доступно ${formatNumber(cap)})`;
+      }
+    }
+    return map;
+  }, [lines]);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!fromWarehouseId || !toWarehouseId) {
+      setError("Укажите склад-источник и склад-получатель");
+      return;
+    }
+    if (Object.keys(lineErrors).length > 0) {
+      setError("Исправьте ошибки в строках перемещения");
+      return;
+    }
+    if (lines.length === 0) {
+      setError("Добавьте хотя бы один товар");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        fromWarehouseId,
+        toWarehouseId,
+        note,
+        lines: lines.map((line) => ({
+          productId: line.productId,
+          productName: line.productName,
+          productCode: line.productCode,
+          productArticle: line.productArticle,
+          qty: line.qty,
+          cartons: line.cartons
+            .filter((c) => line.selectedKeys.includes(cartonOptionKey(c)))
+            .map((c) => ({
+              packingItemId: c.packingItemId,
+              shipmentId: c.shipmentId,
+              cartonNo: c.cartonNo,
+            })),
+        })),
+      };
+
+      const res = await fetch(
+        mode === "edit" && transferId ? `/api/transfers/${transferId}` : "/api/transfers",
+        {
+          method: mode === "edit" ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Не удалось сохранить перемещение");
+      router.push("/transfers");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-2">
+        <WarehouseSelect
+          value={fromWarehouseId}
+          onChange={(id) => {
+            setFromWarehouseId(id);
+            setLines([]);
+            setHits([]);
+          }}
+          label="Склад-источник"
+          placeholder="Выберите склад"
+          allowEmpty
+          disabled={saving || bootstrapping}
+        />
+        <WarehouseSelect
+          value={toWarehouseId}
+          onChange={setToWarehouseId}
+          label="Склад-получатель"
+          placeholder="Выберите склад"
+          allowEmpty
+          disabled={saving || bootstrapping}
+        />
+      </div>
+
+      <label className="block max-w-xl">
+        <span className="mb-1.5 block text-sm font-medium">Комментарий</span>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="field"
+          placeholder="Необязательно"
+          disabled={saving}
+        />
+      </label>
+
+      <div>
+        <div className="mb-1.5 text-sm font-medium">Добавить товар</div>
+        <div className="relative z-30 max-w-xl">
+          <input
+            ref={searchBoxRef}
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            onFocus={onSearchFocus}
+            onBlur={onSearchBlur}
+            className="field"
+            placeholder={
+              fromWarehouseId
+                ? "Поиск по названию, коду, артикулу…"
+                : "Сначала выберите склад-источник"
+            }
+            disabled={!fromWarehouseId || saving || bootstrapping}
+          />
+          {searching && searchOpen ? (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--muted)]">
+              …
+            </div>
+          ) : null}
+          {searchOpen && hits.length > 0 ? (
+            <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-auto rounded-lg border border-[var(--border)] bg-white shadow-lg">
+              {hits.map((product) => (
+                <button
+                  key={product.key}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => addProduct(product)}
+                  className="flex w-full items-start gap-3 border-b border-[var(--border)] px-3 py-2 text-left last:border-b-0 hover:bg-[var(--surface)]"
+                >
+                  {product.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={product.photoUrl}
+                      alt=""
+                      className="h-10 w-10 rounded border border-[var(--border)] object-contain"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded border border-[var(--border)] text-xs text-[var(--muted)]">
+                      —
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{product.productName}</div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {[product.productCode, product.productArticle]
+                        .filter(Boolean)
+                        .join(" · ") || product.supplierName}
+                      {" · остаток "}
+                      {formatNumber(product.availableTotal)} шт
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {searchError ? <p className="mt-1 text-sm text-[#c62828]">{searchError}</p> : null}
+      </div>
+
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th className="w-16">Фото</th>
+              <th>Название</th>
+              <th className="w-28">Кол-во</th>
+              <th>Коробка</th>
+              <th className="w-20" />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="text-[var(--muted)]">
+                  {bootstrapping
+                    ? "Загрузка строк…"
+                    : "Добавьте товары через поиск выше"}
+                </td>
+              </tr>
+            ) : (
+              lines.map((line) => {
+                const showShip = needsShipmentLabel(line.cartons);
+                const err = lineErrors[line.localId];
+                return (
+                  <tr key={line.localId} id={`transfer-line-${line.localId}`}>
+                    <td>
+                      {line.photoUrl ? (
+                        <ProductPhotoPreview src={line.photoUrl} alt={line.productName} />
+                      ) : (
+                        <span className="text-[var(--muted)]">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="font-medium">{line.productName}</div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {[line.productCode, line.productArticle].filter(Boolean).join(" · ") ||
+                          "—"}
+                      </div>
+                      {err ? <div className="mt-1 text-xs text-[#c62828]">{err}</div> : null}
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0.001}
+                        step="any"
+                        value={line.qty}
+                        onChange={(e) =>
+                          updateLine(line.localId, {
+                            qty: Number(e.target.value) || 0,
+                          })
+                        }
+                        className="field py-1.5"
+                        disabled={saving}
+                      />
+                    </td>
+                    <td>
+                      <div className="flex max-h-40 flex-col gap-1 overflow-auto pr-1">
+                        {line.cartons.map((carton) => {
+                          const key = cartonOptionKey(carton);
+                          const checked = line.selectedKeys.includes(key);
+                          return (
+                            <label
+                              key={key}
+                              className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-0.5 text-sm hover:bg-[var(--surface)]"
+                            >
+                              <input
+                                type="checkbox"
+                                className="mt-1"
+                                checked={checked}
+                                onChange={() => toggleCarton(line.localId, carton)}
+                                disabled={saving}
+                              />
+                              <span>
+                                {carton.cartonNo} ({formatNumber(carton.available)} шт)
+                                {showShip || line.cartons.length > 1 ? (
+                                  <span className="text-[var(--muted)]">
+                                    {" "}
+                                    · {carton.shipmentTitle}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td className="text-right">
+                      <button
+                        type="button"
+                        onClick={() => removeLine(line.localId)}
+                        disabled={saving}
+                        className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs text-[#c62828] hover:bg-[#fdeceb] disabled:opacity-60"
+                      >
+                        Убрать
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {error ? <p className="text-sm text-[#c62828]">{error}</p> : null}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="submit"
+          disabled={saving || bootstrapping}
+          className="rounded-lg bg-[var(--brand)] px-4 py-2.5 text-sm font-medium text-[#1a1a1a] hover:brightness-95 disabled:opacity-60"
+        >
+          {saving ? "Сохранение…" : mode === "edit" ? "Сохранить изменения" : "Создать перемещение"}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => router.push("/transfers")}
+          className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm hover:bg-[var(--surface)]"
+        >
+          Отмена
+        </button>
+      </div>
+    </form>
+  );
+}
