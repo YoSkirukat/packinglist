@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { WarehouseSelect } from "@/components/WarehouseSelect";
 import { ProductPhotoPreview } from "@/components/ProductPhotoPreview";
+import { SecondaryButton } from "@/components/ui-client";
 import { formatNumber } from "@/lib/format";
 
 type StockCarton = {
@@ -125,6 +126,7 @@ function CartonsModal({
 
 export function StockBalancesView() {
   const [warehouseId, setWarehouseId] = useState<string | null>(null);
+  const [warehouseName, setWarehouseName] = useState<string | null>(null);
   const [products, setProducts] = useState<StockProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -166,13 +168,30 @@ export function StockBalancesView() {
 
   return (
     <div className="space-y-5">
-      <div className="max-w-md">
-        <WarehouseSelect
-          value={warehouseId}
-          onChange={setWarehouseId}
-          label="Склад"
-          placeholder="Выберите склад"
-        />
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="max-w-md flex-1">
+          <WarehouseSelect
+            value={warehouseId}
+            onChange={(id, warehouse) => {
+              setWarehouseId(id);
+              setWarehouseName(warehouse?.name ?? null);
+            }}
+            label="Склад"
+            placeholder="Выберите склад"
+          />
+        </div>
+        {warehouseId && products.length > 0 && !loading ? (
+          <SecondaryButton
+            type="button"
+            onClick={() =>
+              void import("@/lib/stock-export").then(({ exportStockToExcel }) =>
+                exportStockToExcel(products, warehouseName || "sklad"),
+              )
+            }
+          >
+            Экспорт в Excel
+          </SecondaryButton>
+        ) : null}
       </div>
 
       {!warehouseId ? (

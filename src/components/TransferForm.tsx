@@ -308,6 +308,17 @@ export function TransferForm({
     return map;
   }, [lines]);
 
+  const lineTotals = useMemo(
+    () => ({
+      productCount: lines.length,
+      unitCount: lines.reduce(
+        (sum, line) => sum + (Number.isFinite(line.qty) ? line.qty : 0),
+        0,
+      ),
+    }),
+    [lines],
+  );
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -380,14 +391,20 @@ export function TransferForm({
           allowEmpty
           disabled={saving || bootstrapping}
         />
-        <WarehouseSelect
-          value={toWarehouseId}
-          onChange={setToWarehouseId}
-          label="Склад-получатель"
-          placeholder="Выберите склад"
-          allowEmpty
-          disabled={saving || bootstrapping}
-        />
+        <div>
+          <WarehouseSelect
+            value={toWarehouseId}
+            onChange={setToWarehouseId}
+            label="Склад-получатель"
+            placeholder="Выберите склад"
+            allowEmpty
+            disabled={saving || bootstrapping}
+          />
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Товаров: {formatNumber(lineTotals.productCount)} · Единиц из поставки:{" "}
+            {formatNumber(lineTotals.unitCount, lineTotals.unitCount % 1 === 0 ? 0 : 3)}
+          </p>
+        </div>
       </div>
 
       <label className="block max-w-xl">
