@@ -2,16 +2,43 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { clearSessionCookie, getCurrentUser } from "@/lib/auth";
 import { HeaderAccount } from "@/components/HeaderAccount";
+import { ReportsNav } from "@/components/ReportsNav";
 
 export { PrimaryButton, SecondaryButton } from "@/components/ui-client";
 
-const NAV = [
+const NAV_BEFORE = [
   { href: "/", label: "Обзор" },
   { href: "/shipments", label: "Поставки" },
   { href: "/stock", label: "Остатки" },
   { href: "/transfers", label: "Перемещение товаров" },
-  { href: "/settings", label: "Настройки" },
 ];
+
+const NAV_AFTER = [{ href: "/settings", label: "Настройки" }];
+
+function NavLink({
+  href,
+  label,
+  active,
+}: {
+  href: string;
+  label: string;
+  active?: string;
+}) {
+  const isActive =
+    href === "/" ? active === "/" : Boolean(active?.startsWith(href));
+  return (
+    <Link
+      href={href}
+      className={`relative whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${
+        isActive
+          ? "bg-[var(--surface)] font-medium text-[var(--text)]"
+          : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--text)]"
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
 
 export async function AppHeader({
   active,
@@ -25,11 +52,6 @@ export async function AppHeader({
     await clearSessionCookie();
     redirect("/login");
   }
-
-  const nav = [
-    ...NAV,
-    ...(user.role === "admin" ? [{ href: "/users", label: "Пользователи" }] : []),
-  ];
 
   return (
     <header className="border-b border-[var(--border)] bg-white">
@@ -49,25 +71,16 @@ export async function AppHeader({
         </Link>
 
         <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
-          {nav.map((item) => {
-            const isActive =
-              item.href === "/"
-                ? active === "/"
-                : Boolean(active?.startsWith(item.href));
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`relative whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${
-                  isActive
-                    ? "bg-[var(--surface)] font-medium text-[var(--text)]"
-                    : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--text)]"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+          {NAV_BEFORE.map((item) => (
+            <NavLink key={item.href} {...item} active={active} />
+          ))}
+          <ReportsNav active={active} />
+          {NAV_AFTER.map((item) => (
+            <NavLink key={item.href} {...item} active={active} />
+          ))}
+          {user.role === "admin" ? (
+            <NavLink href="/users" label="Пользователи" active={active} />
+          ) : null}
         </nav>
         <HeaderAccount login={user.login} role={user.role} />
       </div>
