@@ -70,7 +70,7 @@ export async function AppHeader({
           </div>
         </Link>
 
-        <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
+        <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
           {NAV_BEFORE.map((item) => (
             <NavLink key={item.href} {...item} active={active} />
           ))}

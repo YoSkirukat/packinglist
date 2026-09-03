@@ -2,25 +2,17 @@
 
 import { useState } from "react";
 import { WarehouseSelect } from "@/components/WarehouseSelect";
-import { ProductPhotoPreview } from "@/components/ProductPhotoPreview";
+import { SecondaryButton } from "@/components/ui-client";
 import { formatNumber } from "@/lib/format";
-
-type ReportItem = {
-  key: string;
-  productName: string;
-  productCode: string;
-  productArticle: string;
-  qty: number;
-  cost: number;
-  photoUrl: string | null;
-};
+import type { ShippingCostExportRow } from "@/lib/shipping-cost-export";
 
 type ReportResult = {
   transferCount: number;
   unitCost: number;
-  items: ReportItem[];
+  productCount: number;
   totalQty: number;
   totalCost: number;
+  exportRows: ShippingCostExportRow[];
 };
 
 function moneyDigits(value: number) {
@@ -154,80 +146,55 @@ export function ShippingCostReport() {
       {error ? <p className="text-sm text-[#c62828]">{error}</p> : null}
 
       {result ? (
-        <div className="space-y-3">
-          <p className="text-sm text-[var(--muted)]">
-            Перемещений за период: {formatNumber(result.transferCount)} · тариф{" "}
-            {formatNumber(result.unitCost, moneyDigits(result.unitCost))} ₽/шт
-          </p>
-
-          {result.items.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <div className="text-base font-medium">Нет данных</div>
-              <p className="mt-2 text-sm text-[var(--muted)]">
+        <div className="space-y-4">
+          {result.transferCount === 0 ? (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-5 text-sm">
+              <div className="font-medium">Нет данных</div>
+              <p className="mt-1 text-[var(--muted)]">
                 За выбранный период и склады перемещений не найдено.
               </p>
             </div>
           ) : (
-            <div className="table-wrap">
-              <table className="data">
-                <thead>
-                  <tr>
-                    <th className="w-16">Фото</th>
-                    <th>Наименование</th>
-                    <th className="w-28">Кол-во</th>
-                    <th className="w-36">Стоимость</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.items.map((item) => (
-                    <tr key={item.key}>
-                      <td>
-                        {item.photoUrl ? (
-                          <ProductPhotoPreview
-                            src={item.photoUrl}
-                            alt={item.productName}
-                          />
-                        ) : (
-                          <span className="text-[var(--muted)]">—</span>
-                        )}
-                      </td>
-                      <td>
-                        <div className="font-medium">{item.productName}</div>
-                        <div className="text-xs text-[var(--muted)]">
-                          {[item.productCode, item.productArticle]
-                            .filter(Boolean)
-                            .join(" · ") || "—"}
-                        </div>
-                      </td>
-                      <td className="col-center">
-                        {formatNumber(item.qty, qtyDigits(item.qty))}
-                      </td>
-                      <td className="col-center">
-                        {formatNumber(item.cost, moneyDigits(item.cost))} ₽
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={2} className="font-semibold">
-                      Итого
-                    </td>
-                    <td className="col-center font-semibold">
-                      {formatNumber(result.totalQty, qtyDigits(result.totalQty))} шт
-                    </td>
-                    <td className="col-center font-semibold">
-                      {formatNumber(
-                        result.totalCost,
-                        moneyDigits(result.totalCost),
-                      )}{" "}
-                      ₽
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-5 text-sm leading-7">
+              <div>
+                Перемещений за период: {formatNumber(result.transferCount)} шт.
+              </div>
+              <div>
+                Тариф:{" "}
+                {formatNumber(result.unitCost, moneyDigits(result.unitCost))} ₽/шт
+              </div>
+              <div>
+                Количество товаров: {formatNumber(result.productCount)} шт.
+              </div>
+              <div>
+                Количество единиц товара:{" "}
+                {formatNumber(result.totalQty, qtyDigits(result.totalQty))} шт.
+              </div>
+              <div className="font-medium">
+                Итого отправлено товаров на сумму:{" "}
+                {formatNumber(result.totalCost, moneyDigits(result.totalCost))}{" "}
+                руб.
+              </div>
             </div>
           )}
+
+          {result.exportRows.length > 0 ? (
+            <SecondaryButton
+              type="button"
+              onClick={() =>
+                void import("@/lib/shipping-cost-export").then(
+                  ({ exportShippingCostToExcel }) =>
+                    exportShippingCostToExcel(
+                      result.exportRows,
+                      dateFrom,
+                      dateTo,
+                    ),
+                )
+              }
+            >
+              Экспорт в Excel
+            </SecondaryButton>
+          ) : null}
         </div>
       ) : null}
     </div>

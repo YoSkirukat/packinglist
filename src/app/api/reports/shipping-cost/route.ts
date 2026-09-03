@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/auth";
+import { formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
-import {
-  findProductPhoto,
-  listProductPhotos,
-  productPhotoUrl,
-} from "@/lib/product-photos";
 
 function productKey(line: {
   productId: string | null;
@@ -33,11 +29,7 @@ function parseDayEnd(value: string) {
   return d;
 }
 
-export async function POST(request: Request) {
-  const { error } = await requireApiUser();
-  if (error) return error;
-
-  const body = await request.json().catch(() => ({}));
+function parseReportInput(body: Record<string, unknown>) {
   const fromWarehouseId = String(body.fromWarehouseId ?? "");
   const toWarehouseId = String(body.toWarehouseId ?? "");
   const dateFrom = String(body.dateFrom ?? "");
@@ -45,41 +37,55 @@ export async function POST(request: Request) {
   const unitCost = Number(body.unitCost);
 
   if (!fromWarehouseId || !toWarehouseId) {
-    return NextResponse.json(
-      { error: "Укажите склад-отправитель и склад-получатель" },
-      { status: 400 },
-    );
+    return { error: "Укажите склад-отправитель и склад-получатель" as const };
   }
   if (fromWarehouseId === toWarehouseId) {
-    return NextResponse.json(
-      { error: "Склады отправителя и получателя должны отличаться" },
-      { status: 400 },
-    );
+    return {
+      error: "Склады отправителя и получателя должны отличаться" as const,
+    };
   }
   if (!dateFrom || !dateTo) {
-    return NextResponse.json(
-      { error: "Укажите период дат" },
-      { status: 400 },
-    );
+    return { error: "Укажите период дат" as const };
   }
   if (!Number.isFinite(unitCost) || unitCost < 0) {
-    return NextResponse.json(
-      { error: "Укажите корректную стоимость обработки единицы" },
-      { status: 400 },
-    );
+    return {
+      error: "Укажите корректную стоимость обработки единицы" as const,
+    };
   }
 
   const from = parseDayStart(dateFrom);
   const to = parseDayEnd(dateTo);
   if (!from || !to) {
-    return NextResponse.json({ error: "Некорректный период дат" }, { status: 400 });
+    return { error: "Некорректный период дат" as const };
   }
   if (from > to) {
-    return NextResponse.json(
-      { error: "Дата начала не может быть позже даты окончания" },
-      { status: 400 },
-    );
+    return {
+      error: "Дата начала не может быть позже даты окончания" as const,
+    };
   }
+
+  return {
+    fromWarehouseId,
+    toWarehouseId,
+    dateFrom,
+    dateTo,
+    unitCost,
+    from,
+    to,
+  };
+}
+
+export async function POST(request: Request) {
+  const { error } = await requireApiUser();
+  if (error) return error;
+
+  const body = await request.json().catch(() => ({}));
+  const parsed = parseReportInput(body);
+  if ("error" in parsed) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+
+  const { fromWarehouseId, toWarehouseId, unitCost, from, to } = parsed;
 
   const transfers = await prisma.stockTransfer.findMany({
     where: {
@@ -88,68 +94,48 @@ export async function POST(request: Request) {
       createdAt: { gte: from, lte: to },
     },
     include: {
-      lines: true,
+      fromWarehouse: true,
+      toWarehouse: true,
+      lines: { orderBy: { sortOrder: "asc" } },
     },
+    orderBy: { createdAt: "asc" },
   });
 
-  type Agg = {
-    key: string;
-    productId: string | null;
-    productName: string;
-    productCode: string;
-    productArticle: string;
-    qty: number;
-  };
+  const productKeys = new Set<string>();
+  let totalQty = 0;
 
-  const map = new Map<string, Agg>();
+  const exportRows: {
+    date: string;
+    note: string;
+    fromWarehouse: string;
+    toWarehouse: string;
+    productName: string;
+    qty: number;
+  }[] = [];
+
   for (const transfer of transfers) {
     for (const line of transfer.lines) {
-      const key = productKey(line);
-      const existing = map.get(key);
-      if (existing) {
-        existing.qty += line.qty;
-      } else {
-        map.set(key, {
-          key,
-          productId: line.productId,
-          productName: line.productName,
-          productCode: line.productCode,
-          productArticle: line.productArticle,
-          qty: line.qty,
-        });
-      }
+      productKeys.add(productKey(line));
+      totalQty += line.qty;
+      exportRows.push({
+        date: formatDateTime(transfer.createdAt),
+        note: transfer.note || "",
+        fromWarehouse: transfer.fromWarehouse.name,
+        toWarehouse: transfer.toWarehouse.name,
+        productName: line.productName,
+        qty: line.qty,
+      });
     }
   }
 
-  const photoFiles = await listProductPhotos();
-  const items = [...map.values()]
-    .map((item) => {
-      const file = findProductPhoto(
-        photoFiles,
-        item.productCode,
-        item.productArticle,
-      );
-      const cost = item.qty * unitCost;
-      return {
-        key: item.key,
-        productName: item.productName,
-        productCode: item.productCode,
-        productArticle: item.productArticle,
-        qty: item.qty,
-        cost,
-        photoUrl: file ? productPhotoUrl(file) : null,
-      };
-    })
-    .sort((a, b) => a.productName.localeCompare(b.productName, "ru"));
-
-  const totalQty = items.reduce((sum, item) => sum + item.qty, 0);
-  const totalCost = items.reduce((sum, item) => sum + item.cost, 0);
+  const totalCost = totalQty * unitCost;
 
   return NextResponse.json({
     transferCount: transfers.length,
     unitCost,
-    items,
+    productCount: productKeys.size,
     totalQty,
     totalCost,
+    exportRows,
   });
 }
