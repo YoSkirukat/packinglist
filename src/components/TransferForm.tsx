@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { WarehouseSelect } from "@/components/WarehouseSelect";
 import { ProductPhotoPreview } from "@/components/ProductPhotoPreview";
+import { CartonSelect } from "@/components/CartonSelect";
 import { formatNumber } from "@/lib/format";
 
 type CartonOption = {
@@ -67,16 +68,6 @@ function selectedCapacity(line: LineDraft) {
   return line.cartons
     .filter((c) => line.selectedKeys.includes(cartonOptionKey(c)))
     .reduce((sum, c) => sum + c.available, 0);
-}
-
-function needsShipmentLabel(cartons: CartonOption[]) {
-  const byNo = new Map<number, Set<string>>();
-  for (const c of cartons) {
-    const set = byNo.get(c.cartonNo) ?? new Set();
-    set.add(c.shipmentId);
-    byNo.set(c.cartonNo, set);
-  }
-  return [...byNo.values()].some((set) => set.size > 1);
 }
 
 export function TransferForm({
@@ -487,8 +478,8 @@ export function TransferForm({
               <th className="w-16">Фото</th>
               <th>Название</th>
               <th className="w-28">Кол-во</th>
-              <th>Коробка</th>
-              <th className="w-20" />
+              <th className="min-w-[200px]">Коробка</th>
+              <th className="w-12" />
             </tr>
           </thead>
           <tbody>
@@ -502,7 +493,6 @@ export function TransferForm({
               </tr>
             ) : (
               lines.map((line) => {
-                const showShip = needsShipmentLabel(line.cartons);
                 const err = lineErrors[line.localId];
                 return (
                   <tr key={line.localId} id={`transfer-line-${line.localId}`}>
@@ -537,44 +527,39 @@ export function TransferForm({
                       />
                     </td>
                     <td>
-                      <div className="flex max-h-40 flex-col gap-1 overflow-auto pr-1">
-                        {line.cartons.map((carton) => {
-                          const key = cartonOptionKey(carton);
-                          const checked = line.selectedKeys.includes(key);
-                          return (
-                            <label
-                              key={key}
-                              className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-0.5 text-sm hover:bg-[var(--surface)]"
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-1"
-                                checked={checked}
-                                onChange={() => toggleCarton(line.localId, carton)}
-                                disabled={saving}
-                              />
-                              <span>
-                                {carton.cartonNo} ({formatNumber(carton.available)} шт)
-                                {showShip || line.cartons.length > 1 ? (
-                                  <span className="text-[var(--muted)]">
-                                    {" "}
-                                    · {carton.shipmentTitle}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
+                      <CartonSelect
+                        cartons={line.cartons}
+                        selectedKeys={line.selectedKeys}
+                        onToggle={(carton) => toggleCarton(line.localId, carton)}
+                        disabled={saving}
+                      />
                     </td>
                     <td className="text-right">
                       <button
                         type="button"
+                        title="Убрать"
+                        aria-label={`Убрать ${line.productName}`}
                         onClick={() => removeLine(line.localId)}
                         disabled={saving}
-                        className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs text-[#c62828] hover:bg-[#fdeceb] disabled:opacity-60"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border)] text-[#c62828] hover:bg-[#fdeceb] disabled:opacity-60"
                       >
-                        Убрать
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.75"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="h-4 w-4"
+                          aria-hidden
+                        >
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4h8v2" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                          <path d="M10 11v6" />
+                          <path d="M14 11v6" />
+                        </svg>
                       </button>
                     </td>
                   </tr>
