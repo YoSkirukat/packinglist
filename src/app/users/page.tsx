@@ -15,6 +15,7 @@ export default async function UsersPage() {
     select: {
       id: true,
       login: true,
+      name: true,
       role: true,
       blocked: true,
       createdAt: true,

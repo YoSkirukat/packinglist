@@ -12,6 +12,7 @@ import {
 export type SessionUser = {
   id: string;
   login: string;
+  name: string;
   role: "admin" | "user";
   blocked: boolean;
 };
@@ -55,6 +56,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     return {
       id: user.id,
       login: user.login,
+      name: user.name,
       role: user.role === "admin" ? "admin" : "user",
       blocked: user.blocked,
     };
@@ -107,6 +109,13 @@ export function validateLogin(login: string) {
   const value = login.trim();
   if (!/^[a-zA-Z0-9._-]{3,32}$/.test(value)) {
     return "Логин: 3–32 символа, латиница, цифры, точка, _ или -";
+  }
+  return null;
+}
+
+export function validateName(name: string) {
+  if (name.trim().length > 64) {
+    return "Имя не длиннее 64 символов";
   }
   return null;
 }

@@ -5,9 +5,11 @@ import { useState } from "react";
 
 export function HeaderAccount({
   login,
+  name,
   role,
 }: {
   login: string;
+  name?: string;
   role: string;
 }) {
   const router = useRouter();
@@ -27,7 +29,7 @@ export function HeaderAccount({
   return (
     <div className="ml-auto flex shrink-0 items-center gap-3">
       <div className="hidden text-right sm:block">
-        <div className="text-sm font-medium">{login}</div>
+        <div className="text-sm font-medium">{name?.trim() || login}</div>
         <div className="text-[11px] text-[var(--muted)]">
           {role === "admin" ? "Администратор" : "Пользователь"}
         </div>

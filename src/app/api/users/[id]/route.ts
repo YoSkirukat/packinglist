@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import {
   hashPassword,
   requireApiUser,
+  validateName,
   validatePassword,
 } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
@@ -26,8 +27,19 @@ export async function PATCH(
       blocked?: boolean;
       passwordHash?: string;
       role?: string;
+      name?: string;
     } = {};
     const notes: string[] = [];
+
+    if (typeof body.name === "string") {
+      const name = body.name.trim();
+      const nameError = validateName(name);
+      if (nameError) {
+        return NextResponse.json({ error: nameError }, { status: 400 });
+      }
+      data.name = name;
+      notes.push("изменил имя");
+    }
 
     if (typeof body.blocked === "boolean") {
       if (target.id === actor.id && body.blocked) {
@@ -71,6 +83,7 @@ export async function PATCH(
       select: {
         id: true,
         login: true,
+        name: true,
         role: true,
         blocked: true,
         createdAt: true,

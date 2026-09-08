@@ -8,6 +8,7 @@ import { formatDateTime } from "@/lib/format";
 type UserRow = {
   id: string;
   login: string;
+  name: string;
   role: string;
   blocked: boolean;
   createdAt: string | Date;
@@ -22,6 +23,7 @@ export function UsersManager({
 }) {
   const router = useRouter();
   const [login, setLogin] = useState("");
+  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"user" | "admin">("user");
   const [saving, setSaving] = useState(false);
@@ -29,6 +31,8 @@ export function UsersManager({
   const [message, setMessage] = useState<string | null>(null);
   const [passwordUser, setPasswordUser] = useState<UserRow | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [nameUser, setNameUser] = useState<UserRow | null>(null);
+  const [newName, setNewName] = useState("");
 
   const adminCount = useMemo(
     () => users.filter((u) => u.role === "admin" && !u.blocked).length,
@@ -48,11 +52,12 @@ export function UsersManager({
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login, password, role }),
+        body: JSON.stringify({ login, name, password, role }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Не удалось создать");
       setLogin("");
+      setName("");
       setPassword("");
       setRole("user");
       setMessage(`Пользователь ${data.user.login} создан`);
@@ -123,11 +128,28 @@ export function UsersManager({
     }
   }
 
+  async function saveName(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nameUser) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await patchUser(nameUser.id, { name: newName });
+      setMessage(`Имя для ${nameUser.login} обновлено`);
+      setNameUser(null);
+      setNewName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <form
         onSubmit={createUser}
-        className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 md:grid-cols-[1fr_1fr_140px_auto]"
+        className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 md:grid-cols-[1fr_1fr_1fr_140px_auto]"
       >
         <label className="block">
           <span className="mb-1.5 block text-xs font-medium">Логин</span>
@@ -137,6 +159,16 @@ export function UsersManager({
             className="field"
             placeholder="manager"
             required
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium">Имя</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="field"
+            placeholder="Иван Иванов"
+            maxLength={64}
           />
         </label>
         <label className="block">
@@ -180,6 +212,7 @@ export function UsersManager({
           <thead>
             <tr>
               <th>Логин</th>
+              <th>Имя</th>
               <th>Роль</th>
               <th>Статус</th>
               <th>Создан</th>
@@ -199,11 +232,23 @@ export function UsersManager({
                       <span className="ml-2 text-xs text-[var(--muted)]">вы</span>
                     ) : null}
                   </td>
+                  <td>{user.name || <span className="text-[var(--muted)]">—</span>}</td>
                   <td>{user.role === "admin" ? "Админ" : "Пользователь"}</td>
                   <td>{user.blocked ? "Заблокирован" : "Активен"}</td>
                   <td>{formatDateTime(user.createdAt)}</td>
                   <td className="text-right">
                     <div className="flex flex-wrap justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNameUser(user);
+                          setNewName(user.name);
+                          setError(null);
+                        }}
+                        className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs hover:bg-[var(--surface)]"
+                      >
+                        Имя
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
@@ -271,6 +316,54 @@ export function UsersManager({
                   <button
                     type="button"
                     onClick={() => setPasswordUser(null)}
+                    className="rounded-lg border border-[var(--border)] px-3.5 py-2 text-sm"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="rounded-lg bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-[#1a1a1a] disabled:opacity-60"
+                  >
+                    {saving ? "Сохранение…" : "Сохранить"}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {nameUser
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="absolute inset-0 bg-black/45"
+                onClick={() => setNameUser(null)}
+              />
+              <form
+                onSubmit={saveName}
+                className="relative w-full max-w-sm rounded-xl border border-[var(--border)] bg-white p-5 shadow-lg"
+              >
+                <div className="text-sm font-semibold">
+                  Имя для {nameUser.login}
+                </div>
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="field mt-3"
+                  maxLength={64}
+                  placeholder="Иван Иванов"
+                  autoFocus
+                />
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNameUser(null)}
                     className="rounded-lg border border-[var(--border)] px-3.5 py-2 text-sm"
                   >
                     Отмена

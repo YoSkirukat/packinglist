@@ -82,7 +82,7 @@ export async function AppHeader({
             <NavLink href="/users" label="Пользователи" active={active} />
           ) : null}
         </nav>
-        <HeaderAccount login={user.login} role={user.role} />
+        <HeaderAccount login={user.login} name={user.name} role={user.role} />
       </div>
     </header>
   );

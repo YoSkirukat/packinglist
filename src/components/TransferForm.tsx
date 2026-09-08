@@ -95,10 +95,20 @@ export function TransferForm({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(transferId ?? null);
   const [bootstrapping, setBootstrapping] = useState(mode === "edit");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchBoxRef = useRef<HTMLInputElement>(null);
+  const isEditing = savedId !== null;
+
+  useEffect(() => {
+    return () => {
+      if (messageTimer.current) clearTimeout(messageTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (mode !== "edit" || !initial || !fromWarehouseId) {
@@ -313,6 +323,7 @@ export function TransferForm({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setMessage(null);
     if (!fromWarehouseId || !toWarehouseId) {
       setError("Укажите склад-источник и склад-получатель");
       return;
@@ -349,17 +360,24 @@ export function TransferForm({
       };
 
       const res = await fetch(
-        mode === "edit" && transferId ? `/api/transfers/${transferId}` : "/api/transfers",
+        savedId ? `/api/transfers/${savedId}` : "/api/transfers",
         {
-          method: mode === "edit" ? "PATCH" : "POST",
+          method: savedId ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         },
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Не удалось сохранить перемещение");
-      router.push("/transfers");
-      router.refresh();
+
+      if (!savedId && data.transfer?.id) {
+        setSavedId(data.transfer.id);
+        window.history.replaceState(null, "", `/transfers/${data.transfer.id}/edit`);
+      }
+
+      setMessage("Сохранено");
+      if (messageTimer.current) clearTimeout(messageTimer.current);
+      messageTimer.current = setTimeout(() => setMessage(null), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -570,24 +588,26 @@ export function TransferForm({
         </table>
       </div>
 
-      {error ? <p className="text-sm text-[#c62828]">{error}</p> : null}
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={saving || bootstrapping}
-          className="rounded-lg bg-[var(--brand)] px-4 py-2.5 text-sm font-medium text-[#1a1a1a] hover:brightness-95 disabled:opacity-60"
-        >
-          {saving ? "Сохранение…" : mode === "edit" ? "Сохранить изменения" : "Создать перемещение"}
-        </button>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => router.push("/transfers")}
-          className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm hover:bg-[var(--surface)]"
-        >
-          Отмена
-        </button>
+      <div className="sticky bottom-0 z-10 -mx-5 mt-6 border-t border-[var(--border)] bg-white/95 px-5 py-3 backdrop-blur">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={saving || bootstrapping}
+            className="rounded-lg bg-[var(--brand)] px-4 py-2.5 text-sm font-medium text-[#1a1a1a] hover:brightness-95 disabled:opacity-60"
+          >
+            {saving ? "Сохранение…" : isEditing ? "Сохранить изменения" : "Создать перемещение"}
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => router.push("/transfers")}
+            className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm hover:bg-[var(--surface)]"
+          >
+            Отмена
+          </button>
+          {message ? <span className="text-sm font-medium text-[#1a7f37]">{message}</span> : null}
+          {error ? <span className="text-sm text-[#c62828]">{error}</span> : null}
+        </div>
       </div>
     </form>
   );

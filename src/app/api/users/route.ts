@@ -4,6 +4,7 @@ import {
   hashPassword,
   requireApiUser,
   validateLogin,
+  validateName,
   validatePassword,
 } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
@@ -17,6 +18,7 @@ export async function GET() {
     select: {
       id: true,
       login: true,
+      name: true,
       role: true,
       blocked: true,
       createdAt: true,
@@ -33,12 +35,17 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const login = String(body.login ?? "").trim();
+    const name = String(body.name ?? "").trim();
     const password = String(body.password ?? "");
     const role = body.role === "admin" ? "admin" : "user";
 
     const loginError = validateLogin(login);
     if (loginError) {
       return NextResponse.json({ error: loginError }, { status: 400 });
+    }
+    const nameError = validateName(name);
+    if (nameError) {
+      return NextResponse.json({ error: nameError }, { status: 400 });
     }
     const passwordError = validatePassword(password);
     if (passwordError) {
@@ -53,6 +60,7 @@ export async function POST(request: Request) {
     const user = await prisma.user.create({
       data: {
         login,
+        name,
         passwordHash: await hashPassword(password),
         role,
         blocked: false,
@@ -60,6 +68,7 @@ export async function POST(request: Request) {
       select: {
         id: true,
         login: true,
+        name: true,
         role: true,
         blocked: true,
         createdAt: true,
