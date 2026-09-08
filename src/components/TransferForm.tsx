@@ -316,6 +316,8 @@ export function TransferForm({
         lines.map((line) => ({
           photoUrl: line.photoUrl,
           productName: line.productName,
+          productCode: line.productCode,
+          productArticle: line.productArticle,
           qty: line.qty,
           cartonLabel: selectedCartonLabel(line),
         })),

@@ -1,6 +1,8 @@
 export type TransferLineExportRow = {
   photoUrl: string | null;
   productName: string;
+  productCode: string;
+  productArticle: string;
   qty: number;
   cartonLabel: string;
 };
@@ -42,18 +44,37 @@ export async function exportTransferLinesToExcel(
     { header: "Короб WB", key: "boxWb", width: 14 },
   ];
   sheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  sheet.getColumn("qty").alignment = { horizontal: "center", vertical: "middle" };
+  sheet.getColumn("carton").alignment = { horizontal: "center", vertical: "middle" };
   sheet.getColumn("barcode").numFmt = "@";
   sheet.getColumn("boxWb").numFmt = "@";
 
+  const thinBorder = { style: "thin" as const, color: { argb: "FFB0B0B0" } };
+  const allBorders = {
+    top: thinBorder,
+    left: thinBorder,
+    bottom: thinBorder,
+    right: thinBorder,
+  };
+  for (let col = 1; col <= sheet.columns.length; col++) {
+    sheet.getRow(1).getCell(col).border = allBorders;
+  }
+
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    const nameDetails = [row.productCode, row.productArticle].filter(Boolean).join(" · ");
+    const nameValue = nameDetails ? `${row.productName}\n${nameDetails}` : row.productName;
     const excelRow = sheet.addRow({
-      name: row.productName,
+      name: nameValue,
       qty: row.qty,
       carton: row.cartonLabel,
     });
     excelRow.height = 58;
-    excelRow.alignment = { vertical: "middle", wrapText: true };
+    excelRow.getCell("name").alignment = { vertical: "middle", wrapText: true };
+    for (let col = 1; col <= sheet.columns.length; col++) {
+      excelRow.getCell(col).border = allBorders;
+    }
 
     if (row.photoUrl) {
       try {
