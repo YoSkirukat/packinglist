@@ -6,6 +6,7 @@ import { WarehouseSelect } from "@/components/WarehouseSelect";
 import { ProductPhotoPreview } from "@/components/ProductPhotoPreview";
 import { CartonSelect } from "@/components/CartonSelect";
 import { formatNumber } from "@/lib/format";
+import { exportTransferLinesToExcel } from "@/lib/transfer-line-export";
 
 type CartonOption = {
   packingItemId: string;
@@ -70,6 +71,14 @@ function selectedCapacity(line: LineDraft) {
     .reduce((sum, c) => sum + c.available, 0);
 }
 
+function selectedCartonLabel(line: LineDraft) {
+  return line.cartons
+    .filter((c) => line.selectedKeys.includes(cartonOptionKey(c)))
+    .map((c) => c.cartonNo)
+    .sort((a, b) => a - b)
+    .join(", ");
+}
+
 export function TransferForm({
   mode,
   transferId,
@@ -86,6 +95,8 @@ export function TransferForm({
   const [toWarehouseId, setToWarehouseId] = useState<string | null>(
     initial?.toWarehouseId ?? null,
   );
+  const [fromWarehouseName, setFromWarehouseName] = useState<string | null>(null);
+  const [toWarehouseName, setToWarehouseName] = useState<string | null>(null);
   const [note, setNote] = useState(initial?.note ?? "");
   const [lines, setLines] = useState<LineDraft[]>([]);
   const [query, setQuery] = useState("");
@@ -94,6 +105,7 @@ export function TransferForm({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(transferId ?? null);
@@ -296,6 +308,27 @@ export function TransferForm({
     setLines((prev) => prev.filter((l) => l.localId !== localId));
   }
 
+  async function exportExcel() {
+    setExporting(true);
+    setError(null);
+    try {
+      await exportTransferLinesToExcel(
+        lines.map((line) => ({
+          photoUrl: line.photoUrl,
+          productName: line.productName,
+          qty: line.qty,
+          cartonLabel: selectedCartonLabel(line),
+        })),
+        fromWarehouseName || "sklad",
+        toWarehouseName || "sklad",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const lineErrors = useMemo(() => {
     const map: Record<string, string> = {};
     for (const line of lines) {
@@ -390,8 +423,9 @@ export function TransferForm({
       <div className="grid gap-4 md:grid-cols-2">
         <WarehouseSelect
           value={fromWarehouseId}
-          onChange={(id) => {
+          onChange={(id, wh) => {
             setFromWarehouseId(id);
+            setFromWarehouseName(wh?.name ?? null);
             setLines([]);
             setHits([]);
           }}
@@ -403,7 +437,10 @@ export function TransferForm({
         <div>
           <WarehouseSelect
             value={toWarehouseId}
-            onChange={setToWarehouseId}
+            onChange={(id, wh) => {
+              setToWarehouseId(id);
+              setToWarehouseName(wh?.name ?? null);
+            }}
             label="Склад-получатель"
             placeholder="Выберите склад"
             allowEmpty
@@ -487,6 +524,18 @@ export function TransferForm({
           ) : null}
         </div>
         {searchError ? <p className="mt-1 text-sm text-[#c62828]">{searchError}</p> : null}
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium">Товары в перемещении</div>
+        <button
+          type="button"
+          disabled={exporting || lines.length === 0}
+          onClick={() => void exportExcel()}
+          className="rounded-lg border border-[var(--border)] px-3.5 py-2 text-sm font-medium hover:bg-[var(--surface)] disabled:opacity-60"
+        >
+          {exporting ? "Экспорт…" : "Экспорт в Excel"}
+        </button>
       </div>
 
       <div className="table-wrap">
