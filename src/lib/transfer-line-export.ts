@@ -3,6 +3,7 @@ export type TransferLineExportRow = {
   productName: string;
   productCode: string;
   productArticle: string;
+  supplierName: string;
   qty: number;
   cartonLabel: string;
 };
@@ -46,7 +47,11 @@ export async function exportTransferLinesToExcel(
   sheet.getRow(1).font = { bold: true };
   sheet.getRow(1).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
   sheet.getColumn("qty").alignment = { horizontal: "center", vertical: "middle" };
-  sheet.getColumn("carton").alignment = { horizontal: "center", vertical: "middle" };
+  sheet.getColumn("carton").alignment = {
+    horizontal: "center",
+    vertical: "middle",
+    wrapText: true,
+  };
   sheet.getColumn("barcode").numFmt = "@";
   sheet.getColumn("boxWb").numFmt = "@";
 
@@ -63,14 +68,26 @@ export async function exportTransferLinesToExcel(
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    // Собираем название из нескольких строк: имя товара, код · артикул,
+    // китайское название. Каждое значение выводится на отдельной строке.
+    const nameLines = [row.productName];
     const nameDetails = [row.productCode, row.productArticle].filter(Boolean).join(" · ");
-    const nameValue = nameDetails ? `${row.productName}\n${nameDetails}` : row.productName;
+    if (nameDetails) nameLines.push(nameDetails);
+    if (row.supplierName && row.supplierName !== row.productName) {
+      nameLines.push(row.supplierName);
+    }
+    const nameValue = nameLines.join("\n");
+    const cartonLines = row.cartonLabel.split("\n").filter(Boolean);
+
     const excelRow = sheet.addRow({
       name: nameValue,
       qty: row.qty,
       carton: row.cartonLabel,
     });
-    excelRow.height = 58;
+    // Высота строки подстраивается под количество строк в ячейках, но не
+    // меньше минимума, чтобы вместить фото товара.
+    const visualLines = Math.max(1, nameLines.length, cartonLines.length);
+    excelRow.height = Math.max(58, visualLines * 15 + 8);
     excelRow.getCell("name").alignment = { vertical: "middle", wrapText: true };
     for (let col = 1; col <= sheet.columns.length; col++) {
       excelRow.getCell(col).border = allBorders;

@@ -39,6 +39,18 @@ function cartonKey(c: Pick<StockCarton, "packingItemId" | "cartonNo">) {
   return `${c.packingItemId}:${c.cartonNo}`;
 }
 
+function parseQty(text: string): number {
+  const normalized = text.replace(",", ".").trim();
+  if (normalized === "") return 0;
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function formatQtyInput(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return String(Math.round(value * 1e6) / 1e6);
+}
+
 function ProductNameCell({ product }: { product: StockProduct }) {
   const mapped =
     Boolean(product.productCode) ||
@@ -151,10 +163,16 @@ function AddToTransferModal({
   onSave: (line: PendingTransferLine) => void;
   onRemove: () => void;
 }) {
-  const [qty, setQty] = useState<number>(existing?.qty ?? product.availableTotal);
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(existing ? existing.cartons.map((c) => cartonKey(c)) : product.cartons.map((c) => cartonKey(c))),
+  const [qtyText, setQtyText] = useState<string>(() =>
+    existing ? formatQtyInput(existing.qty) : "",
   );
+  const [selected, setSelected] = useState<Set<string>>(
+    () =>
+      new Set(
+        existing ? existing.cartons.map((c) => cartonKey(c)) : [],
+      ),
+  );
+  const [interacted, setInteracted] = useState(false);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -164,6 +182,7 @@ function AddToTransferModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const qty = parseQty(qtyText);
   const selectedCartons = product.cartons.filter((c) => selected.has(cartonKey(c)));
   const capacity = selectedCartons.reduce((sum, c) => sum + c.available, 0);
 
@@ -176,24 +195,53 @@ function AddToTransferModal({
           ? `Недостаточно в выбранных коробках (доступно ${formatNumber(capacity)})`
           : null;
 
+  function adjustQty(delta: number) {
+    setQtyText((prev) => formatQtyInput(Math.max(0, parseQty(prev) + delta)));
+  }
+
   function toggle(carton: StockCarton) {
     const key = cartonKey(carton);
+    const checked = selected.has(key);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+    // Отмечая коробку, добавляем её остаток к количеству, снимая — вычитаем.
+    // Пользователь всегда может потом поправить количество вручную.
+    adjustQty(checked ? -carton.available : carton.available);
+    setInteracted(true);
+  }
+
+  function selectAll() {
+    const unselected = product.cartons.filter((c) => !selected.has(cartonKey(c)));
+    if (unselected.length === 0) return;
+    setSelected(new Set(product.cartons.map((c) => cartonKey(c))));
+    adjustQty(unselected.reduce((sum, c) => sum + c.available, 0));
+    setInteracted(true);
+  }
+
+  function clearAll() {
+    if (selected.size === 0) return;
+    const removed = product.cartons.filter((c) => selected.has(cartonKey(c)));
+    setSelected(new Set());
+    adjustQty(-removed.reduce((sum, c) => sum + c.available, 0));
+    setInteracted(true);
   }
 
   function submit() {
-    if (error) return;
+    if (error) {
+      setInteracted(true);
+      return;
+    }
     onSave({
       key: product.key,
       productId: product.productId,
       productName: product.productName,
       productCode: product.productCode,
       productArticle: product.productArticle,
+      supplierName: product.supplierName,
       photoUrl: product.photoUrl,
       qty,
       cartons: selectedCartons,
@@ -223,8 +271,12 @@ function AddToTransferModal({
             type="number"
             min={0.001}
             step="any"
-            value={qty}
-            onChange={(e) => setQty(Number(e.target.value) || 0)}
+            value={qtyText}
+            onChange={(e) => {
+              setQtyText(e.target.value);
+              setInteracted(true);
+            }}
+            placeholder="0"
             className="field"
             autoFocus
           />
@@ -236,14 +288,14 @@ function AddToTransferModal({
             <div className="flex gap-2 text-xs">
               <button
                 type="button"
-                onClick={() => setSelected(new Set(product.cartons.map((c) => cartonKey(c))))}
+                onClick={selectAll}
                 className="text-[var(--link)] hover:underline"
               >
                 Выбрать все
               </button>
               <button
                 type="button"
-                onClick={() => setSelected(new Set())}
+                onClick={clearAll}
                 className="text-[var(--link)] hover:underline"
               >
                 Снять все
@@ -286,7 +338,9 @@ function AddToTransferModal({
           </ul>
         </div>
 
-        {error ? <p className="mt-3 text-sm text-[#c62828]">{error}</p> : null}
+        {error && interacted ? (
+          <p className="mt-3 text-sm text-[#c62828]">{error}</p>
+        ) : null}
 
         <div className="mt-4 flex items-center justify-between gap-2">
           <div>

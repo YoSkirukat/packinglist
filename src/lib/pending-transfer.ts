@@ -12,6 +12,7 @@ export type PendingTransferLine = {
   productName: string;
   productCode: string;
   productArticle: string;
+  supplierName?: string;
   photoUrl: string | null;
   qty: number;
   cartons: PendingTransferCarton[];

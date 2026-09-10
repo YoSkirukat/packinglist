@@ -37,6 +37,7 @@ type LineDraft = {
   productName: string;
   productCode: string;
   productArticle: string;
+  supplierName: string;
   photoUrl: string | null;
   qty: number;
   cartons: CartonOption[];
@@ -95,12 +96,12 @@ function selectedCartonLabel(line: LineDraft) {
     return allocations
       .sort((a, b) => a.cartonNo - b.cartonNo)
       .map((a) => `${a.cartonNo} (${formatNumber(a.qty)} шт.)`)
-      .join(", ");
+      .join("\n");
   } catch {
     return selected
       .map((c) => c.cartonNo)
       .sort((a, b) => a - b)
-      .join(", ");
+      .join("\n");
   }
 }
 
@@ -218,6 +219,7 @@ export function TransferForm({
             productName: line.productName,
             productCode: line.productCode,
             productArticle: line.productArticle,
+            supplierName: match?.supplierName ?? "",
             photoUrl: match?.photoUrl ?? line.photoUrl ?? null,
             qty: line.qty,
             cartons: [...cartonMap.values()],
@@ -264,6 +266,7 @@ export function TransferForm({
           productName: line.productName,
           productCode: line.productCode,
           productArticle: line.productArticle,
+          supplierName: line.supplierName ?? "",
           photoUrl: line.photoUrl,
           qty: line.qty,
           cartons: line.cartons,
@@ -356,6 +359,7 @@ export function TransferForm({
         productName: product.productName,
         productCode: product.productCode,
         productArticle: product.productArticle,
+        supplierName: product.supplierName,
         photoUrl: product.photoUrl,
         qty: 1,
         cartons: product.cartons,
@@ -398,6 +402,7 @@ export function TransferForm({
           productName: line.productName,
           productCode: line.productCode,
           productArticle: line.productArticle,
+          supplierName: line.supplierName,
           qty: line.qty,
           cartonLabel: selectedCartonLabel(line),
         })),
