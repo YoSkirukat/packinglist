@@ -34,6 +34,8 @@ export async function GET(request: Request) {
         cartonCount: p.cartonCount,
         photoUrl: file ? productPhotoUrl(file) : null,
         cartons: p.cartons.map((c) => ({
+          packingItemId: c.packingItemId,
+          shipmentId: c.shipmentId,
           cartonNo: c.cartonNo,
           available: c.available,
           shipmentTitle: c.shipmentTitle,

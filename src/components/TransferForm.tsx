@@ -7,6 +7,8 @@ import { ProductPhotoPreview } from "@/components/ProductPhotoPreview";
 import { CartonSelect } from "@/components/CartonSelect";
 import { formatNumber } from "@/lib/format";
 import { exportTransferLinesToExcel } from "@/lib/transfer-line-export";
+import { loadPendingTransfer, clearPendingTransfer } from "@/lib/pending-transfer";
+import { allocateQtyAcrossCartons } from "@/lib/stock";
 
 type CartonOption = {
   packingItemId: string;
@@ -72,11 +74,34 @@ function selectedCapacity(line: LineDraft) {
 }
 
 function selectedCartonLabel(line: LineDraft) {
-  return line.cartons
-    .filter((c) => line.selectedKeys.includes(cartonOptionKey(c)))
-    .map((c) => c.cartonNo)
-    .sort((a, b) => a - b)
-    .join(", ");
+  const selected = line.cartons.filter((c) =>
+    line.selectedKeys.includes(cartonOptionKey(c)),
+  );
+  if (selected.length === 0) return "";
+
+  // Show how much of the line's qty comes from each carton, using the same
+  // lowest-carton-first split the server applies when the transfer is saved,
+  // so the label always matches what actually ends up in the database.
+  try {
+    const allocations = allocateQtyAcrossCartons(
+      line.qty,
+      selected.map((c) => ({
+        packingItemId: c.packingItemId,
+        shipmentId: c.shipmentId,
+        cartonNo: c.cartonNo,
+        available: c.available,
+      })),
+    );
+    return allocations
+      .sort((a, b) => a.cartonNo - b.cartonNo)
+      .map((a) => `${a.cartonNo} (${formatNumber(a.qty)} шт.)`)
+      .join(", ");
+  } catch {
+    return selected
+      .map((c) => c.cartonNo)
+      .sort((a, b) => a - b)
+      .join(", ");
+  }
 }
 
 export function TransferForm({
@@ -114,6 +139,7 @@ export function TransferForm({
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchBoxRef = useRef<HTMLInputElement>(null);
+  const draftConsumedRef = useRef(false);
   const isEditing = savedId !== null;
 
   useEffect(() => {
@@ -123,24 +149,39 @@ export function TransferForm({
   }, []);
 
   useEffect(() => {
-    if (mode !== "edit" || !initial || !fromWarehouseId) {
-      setBootstrapping(false);
-      return;
-    }
+    type SourceLine = {
+      productId: string | null;
+      productName: string;
+      productCode: string;
+      productArticle: string;
+      qty: number;
+      photoUrl?: string | null;
+      allocations: { packingItemId: string; shipmentId: string; cartonNo: number; qty: number }[];
+    };
 
     let cancelled = false;
-    async function hydrate() {
+
+    async function hydrateFrom(
+      sourceWarehouseId: string,
+      sourceLines: SourceLine[],
+      excludeTransferId?: string,
+    ) {
       setBootstrapping(true);
       setError(null);
       try {
-        const res = await fetch(
-          `/api/transfers/stock?warehouseId=${encodeURIComponent(fromWarehouseId!)}&q=&limit=80&excludeTransferId=${encodeURIComponent(initial!.id)}`,
-        );
+        const params = new URLSearchParams({
+          warehouseId: sourceWarehouseId,
+          q: "",
+          limit: "80",
+        });
+        if (excludeTransferId) params.set("excludeTransferId", excludeTransferId);
+        const res = await fetch(`/api/transfers/stock?${params}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Не удалось загрузить остатки");
+        if (cancelled) return;
         const products = (data.products || []) as StockProduct[];
 
-        const nextLines: LineDraft[] = initial!.lines.map((line, index) => {
+        const nextLines: LineDraft[] = sourceLines.map((line, index) => {
           const match =
             products.find(
               (p) =>
@@ -177,7 +218,7 @@ export function TransferForm({
             productName: line.productName,
             productCode: line.productCode,
             productArticle: line.productArticle,
-            photoUrl: match?.photoUrl ?? null,
+            photoUrl: match?.photoUrl ?? line.photoUrl ?? null,
             qty: line.qty,
             cartons: [...cartonMap.values()],
             selectedKeys,
@@ -192,10 +233,49 @@ export function TransferForm({
       }
     }
 
-    void hydrate();
-    return () => {
-      cancelled = true;
-    };
+    if (mode === "edit") {
+      if (!initial || !fromWarehouseId) {
+        setBootstrapping(false);
+        return;
+      }
+      void hydrateFrom(fromWarehouseId, initial.lines, initial.id);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (mode === "create" && !draftConsumedRef.current) {
+      const draft = loadPendingTransfer();
+      if (draft && draft.lines.length > 0) {
+        draftConsumedRef.current = true;
+        clearPendingTransfer();
+        setFromWarehouseId(draft.warehouseId);
+        setFromWarehouseName(draft.warehouseName);
+
+        // The draft already carries everything a line needs (it was built from
+        // a fresh /api/stock read moments ago on the Stock page), so populate
+        // the table directly instead of round-tripping through
+        // /api/transfers/stock and matching products back up - that extra
+        // hop only adds a chance to end up with an empty table.
+        const draftLines: LineDraft[] = draft.lines.map((line, index) => ({
+          localId: `draft-${index}`,
+          key: line.key,
+          productId: line.productId,
+          productName: line.productName,
+          productCode: line.productCode,
+          productArticle: line.productArticle,
+          photoUrl: line.photoUrl,
+          qty: line.qty,
+          cartons: line.cartons,
+          selectedKeys: line.cartons.map((c) => cartonOptionKey(c)),
+        }));
+        setLines(draftLines);
+        setBootstrapping(false);
+        return;
+      }
+    }
+
+    setBootstrapping(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, transferId]);
 
