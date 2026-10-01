@@ -378,6 +378,8 @@ export function StockBalancesView() {
   const [warehouseId, setWarehouseId] = useState<string | null>(null);
   const [warehouseName, setWarehouseName] = useState<string | null>(null);
   const [products, setProducts] = useState<StockProduct[]>([]);
+  const [totalWeight, setTotalWeight] = useState(0);
+  const [totalVolume, setTotalVolume] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cartonsProduct, setCartonsProduct] = useState<StockProduct | null>(null);
@@ -418,6 +420,8 @@ export function StockBalancesView() {
   useEffect(() => {
     if (!warehouseId) {
       setProducts([]);
+      setTotalWeight(0);
+      setTotalVolume(0);
       setError(null);
       return;
     }
@@ -432,10 +436,16 @@ export function StockBalancesView() {
         );
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Не удалось загрузить остатки");
-        if (!cancelled) setProducts(data.products || []);
+        if (!cancelled) {
+          setProducts(data.products || []);
+          setTotalWeight(Number(data.totalWeight) || 0);
+          setTotalVolume(Number(data.totalVolume) || 0);
+        }
       } catch (err) {
         if (!cancelled) {
           setProducts([]);
+          setTotalWeight(0);
+          setTotalVolume(0);
           setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
@@ -531,6 +541,23 @@ export function StockBalancesView() {
           </SecondaryButton>
         ) : null}
       </div>
+
+      {warehouseId && !loading && !error && products.length > 0 ? (
+        <div className="fade-in grid gap-3 sm:max-w-md sm:grid-cols-2">
+          <div className="rounded-xl border border-[var(--border)] bg-white px-4 py-4">
+            <div className="text-xs text-[var(--muted)]">Вес товара</div>
+            <div className="mt-1 text-xl font-semibold">
+              {formatNumber(totalWeight, 1)} кг
+            </div>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] bg-white px-4 py-4">
+            <div className="text-xs text-[var(--muted)]">Объём товара</div>
+            <div className="mt-1 text-xl font-semibold">
+              {formatNumber(totalVolume, 3)} м³
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {!warehouseId ? (
         <div className="px-6 py-16 text-center">

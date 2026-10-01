@@ -17,10 +17,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Укажите склад" }, { status: 400 });
   }
 
-  const products = await getWarehouseStock(warehouseId);
+  const { products, totalWeight, totalVolume } =
+    await getWarehouseStock(warehouseId);
   const photoFiles = await listProductPhotos();
 
   return NextResponse.json({
+    totalWeight,
+    totalVolume,
     products: products.map((p) => {
       const file = findProductPhoto(photoFiles, p.productCode, p.productArticle);
       return {

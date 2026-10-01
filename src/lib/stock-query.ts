@@ -2,11 +2,18 @@ import { prisma } from "@/lib/prisma";
 import {
   allocationKey,
   buildCartonSlots,
+  cartonMetrics,
+  cartonRemainingRatio,
   matchesStockQuery,
   productGroupKey,
   type CartonSlot,
   type PackingItemStockSource,
 } from "@/lib/stock";
+
+function roundTo(value: number, digits: number) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
 
 export async function loadUsedQtyByCarton(excludeTransferId?: string | null) {
   const allocations = await prisma.stockTransferAllocation.findMany({
@@ -77,6 +84,10 @@ export async function getWarehouseCartonSlots(input: {
           mappedCode: true,
           mappedArticle: true,
           supplierName: true,
+          grossWeightPerCarton: true,
+          totalGrossWeight: true,
+          volumeCbm: true,
+          totalCbm: true,
         },
       },
     },
@@ -103,12 +114,16 @@ export type StockProductHit = {
   productArticle: string;
   supplierName: string;
   availableTotal: number;
+  weightTotal: number;
+  volumeTotal: number;
   cartons: {
     packingItemId: string;
     shipmentId: string;
     shipmentTitle: string;
     cartonNo: number;
     available: number;
+    weight: number;
+    volume: number;
   }[];
 };
 
@@ -132,17 +147,24 @@ export function groupSlotsToProducts(
         productArticle: slot.productArticle,
         supplierName: slot.supplierName,
         availableTotal: 0,
+        weightTotal: 0,
+        volumeTotal: 0,
         cartons: [],
       };
       groups.set(key, group);
     }
+    const ratio = cartonRemainingRatio(slot);
     group.availableTotal += slot.available;
+    group.weightTotal += slot.weightPerCarton * ratio;
+    group.volumeTotal += slot.volumePerCarton * ratio;
     group.cartons.push({
       packingItemId: slot.packingItemId,
       shipmentId: slot.shipmentId,
       shipmentTitle: slot.shipmentTitle,
       cartonNo: slot.cartonNo,
       available: slot.available,
+      weight: slot.weightPerCarton * ratio,
+      volume: slot.volumePerCarton * ratio,
     });
   }
 
@@ -158,6 +180,8 @@ export function groupSlotsToProducts(
         const prev = cartonMap.get(ck);
         if (prev) {
           prev.available = Math.round((prev.available + c.available) * 1000) / 1000;
+          prev.weight += c.weight;
+          prev.volume += c.volume;
         } else {
           cartonMap.set(ck, { ...c });
         }
@@ -171,6 +195,14 @@ export function groupSlotsToProducts(
         availableTotal: Math.round(
           cartons.reduce((sum, c) => sum + c.available, 0) * 1000,
         ) / 1000,
+        weightTotal: roundTo(
+          cartons.reduce((sum, c) => sum + c.weight, 0),
+          3,
+        ),
+        volumeTotal: roundTo(
+          cartons.reduce((sum, c) => sum + c.volume, 0),
+          6,
+        ),
         cartons,
       };
     })
@@ -236,11 +268,26 @@ export async function getInboundWarehouseCartonSlots(
   const packingItems = packingItemIds.size
     ? await prisma.packingItem.findMany({
         where: { id: { in: [...packingItemIds] } },
-        select: { id: true, supplierName: true },
+        select: {
+          id: true,
+          supplierName: true,
+          cartonLabel: true,
+          cartonFrom: true,
+          cartonTo: true,
+          pcsPerCarton: true,
+          totalPcs: true,
+          grossWeightPerCarton: true,
+          totalGrossWeight: true,
+          volumeCbm: true,
+          totalCbm: true,
+        },
       })
     : [];
   const supplierByItem = Object.fromEntries(
     packingItems.map((i) => [i.id, i.supplierName]),
+  );
+  const metricsByItem = new Map(
+    packingItems.map((i) => [i.id, cartonMetrics(i)] as const),
   );
 
   const merged = new Map<string, CartonSlot>();
@@ -257,6 +304,7 @@ export async function getInboundWarehouseCartonSlots(
           existing.initialQty = existing.available;
           continue;
         }
+        const metrics = metricsByItem.get(a.packingItemId);
         merged.set(key, {
           packingItemId: a.packingItemId,
           shipmentId: a.shipmentId,
@@ -269,6 +317,9 @@ export async function getInboundWarehouseCartonSlots(
           productCode: line.productCode,
           productArticle: line.productArticle,
           supplierName: supplierByItem[a.packingItemId] || "",
+          weightPerCarton: metrics?.weightPerCarton ?? 0,
+          volumePerCarton: metrics?.volumePerCarton ?? 0,
+          fullCartonQty: metrics?.fullCartonQty ?? 0,
         });
       }
     }
@@ -277,9 +328,15 @@ export async function getInboundWarehouseCartonSlots(
   return [...merged.values()];
 }
 
-export async function getWarehouseStock(warehouseId: string): Promise<
-  (StockProductHit & { cartonCount: number })[]
-> {
+export type WarehouseStock = {
+  products: (StockProductHit & { cartonCount: number })[];
+  totalWeight: number;
+  totalVolume: number;
+};
+
+export async function getWarehouseStock(
+  warehouseId: string,
+): Promise<WarehouseStock> {
   const [localSlots, inboundSlots] = await Promise.all([
     getWarehouseCartonSlots({ warehouseId }),
     getInboundWarehouseCartonSlots(warehouseId),
@@ -288,10 +345,20 @@ export async function getWarehouseStock(warehouseId: string): Promise<
   const products = groupSlotsToProducts(
     [...localSlots, ...inboundSlots],
     "",
-  );
-
-  return products.map((p) => ({
+  ).map((p) => ({
     ...p,
     cartonCount: p.cartons.filter((c) => c.available > 0).length,
   }));
+
+  return {
+    products,
+    totalWeight: roundTo(
+      products.reduce((sum, p) => sum + p.weightTotal, 0),
+      3,
+    ),
+    totalVolume: roundTo(
+      products.reduce((sum, p) => sum + p.volumeTotal, 0),
+      6,
+    ),
+  };
 }

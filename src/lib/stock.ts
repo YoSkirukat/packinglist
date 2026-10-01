@@ -7,7 +7,14 @@ export type PackingItemCartonSource = {
   totalPcs: number | null;
 };
 
-export type PackingItemStockSource = PackingItemCartonSource & {
+export type PackingItemMetricsSource = PackingItemCartonSource & {
+  grossWeightPerCarton: number | null;
+  totalGrossWeight: number | null;
+  volumeCbm: number | null;
+  totalCbm: number | null;
+};
+
+export type PackingItemStockSource = PackingItemMetricsSource & {
   shipmentId: string;
   productId: string | null;
   mappedName: string;
@@ -28,6 +35,9 @@ export type CartonSlot = {
   productCode: string;
   productArticle: string;
   supplierName: string;
+  weightPerCarton: number;
+  volumePerCarton: number;
+  fullCartonQty: number;
 };
 
 export type CartonAllocationKey = {
@@ -95,6 +105,38 @@ export function allocationKey(packingItemId: string, cartonNo: number) {
   return `${packingItemId}:${cartonNo}`;
 }
 
+export function cartonMetrics(item: PackingItemMetricsSource) {
+  const cartonCount = expandItemCartons(item).length;
+  const weightPerCarton =
+    item.grossWeightPerCarton ??
+    (item.totalGrossWeight != null && cartonCount > 0
+      ? item.totalGrossWeight / cartonCount
+      : 0);
+  const volumePerCarton =
+    item.volumeCbm ??
+    (item.totalCbm != null && cartonCount > 0
+      ? item.totalCbm / cartonCount
+      : 0);
+  return {
+    weightPerCarton,
+    volumePerCarton,
+    fullCartonQty: initialQtyPerCarton(item),
+  };
+}
+
+// Доля коробки, оставшаяся на складе: 1 для целой коробки и меньше при
+// частичном расходе (например, часть штук перемещена в другой склад).
+export function cartonRemainingRatio(slot: {
+  available: number;
+  fullCartonQty: number;
+}): number {
+  if (slot.available <= 0) return 0;
+  if (slot.fullCartonQty > 0) {
+    return Math.min(1, slot.available / slot.fullCartonQty);
+  }
+  return 1;
+}
+
 export function buildCartonSlots(input: {
   items: PackingItemStockSource[];
   shipmentTitles: Record<string, string>;
@@ -107,6 +149,7 @@ export function buildCartonSlots(input: {
     if (cartonNos.length === 0) continue;
     const initial = initialQtyPerCarton(item);
     if (initial <= 0) continue;
+    const metrics = cartonMetrics(item);
 
     const productName =
       item.mappedName.trim() || item.supplierName.trim() || "Без названия";
@@ -129,6 +172,9 @@ export function buildCartonSlots(input: {
         productCode: item.mappedCode || "",
         productArticle: item.mappedArticle || "",
         supplierName: item.supplierName,
+        weightPerCarton: metrics.weightPerCarton,
+        volumePerCarton: metrics.volumePerCarton,
+        fullCartonQty: initial,
       });
     }
   }
